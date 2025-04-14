@@ -2,15 +2,16 @@
 
 ## Introduction
 
-Promises can be difficult to understand, when we are first learning about them.
-Why do we need them? What problem are they solving? How do they work? These are all valid questions that I'll try to answer below. Before we can do that, we need to cover some basic concepts:
+Promises can be difficult to understand, when we are first learning about them. Why do we need them? What problem are they solving? How do they work? These are all valid questions that I'll try to answer below. This guide does **not** explain the syntax or inner workings of Promises. Instead, it will help you understand at a high level how they work, which should make the syntax a little easier to follow.
+
+Before we can do any of that, we need to cover some basic concepts:
 
 ### Basic concepts
 
 - **Instructions**: When we write code, we are effectively writing a set of **instructions** for the computer to follow
 - **Single Threaded**: JavaScript can only use one thread in your CPU. This means that it can only execute one set of instructions at a time and can't do work in parallel\*.
   - Even when it looks like JS is doing two things at once, it's _actually_ just witching back and forth really fast!
-  - *: Technically we can use something called *web workers* or *worker threads\* which allow us to use more than one CPU thread for some things, but that's way outside our scope today
+  - \*: Technically we can use something called _web workers_ or _worker threads_ which allow us to use more than one CPU thread for some tasks, but that's way outside our scope today
 - **Types of instructions**:
   - **Blocking** instructions keep the main thread busy until they finish, meaning that no other work can get done
   - **Non-blocking** instructions can be started, and allow JS can move on to the next instruction while waiting for a response.
@@ -21,68 +22,122 @@ Why do we need them? What problem are they solving? How do they work? These are 
 
 ### The problem
 
-What if we are making a call to another server and we don’t know when (or even if) we’ll get a response? And what if the process takes a very long time?
+Imagine we have two functions that make API calls. For now we will call them functionOne() and functionTwo() (for obvious reasons). They look something like this:
 
-That's where two key features of JavaScript come into play: Promises and the event loop.
+```js
+/* 
+  Note 1: This is NOT the correct syntax! Just an illustration. 
+  Note 2: callApi is a (made up) function, to keep the example simple.
+*/
+function functionOne() {
+  const firstApiCall = callApi("first-api-url.com", { method: "GET" }); //Always takes at least 10 seconds
 
-Promises allow us to tell Javascript that it needs to wait for a response. For example, when we make a call to a back end API to get the user’s name, the instruction would look something like this:
-
-function getUserData(userId) {
-const userData = fetch(`${backend-url}/user/${userId}`, { method: GET })
-
-return userData.name
+  console.log("Here is your data:", firstApiCall.data);
 }
 
-But there’s a problem - Javascript will immediately try to read `userData.name`, even though the API hasn’t responded yet! This will cause an error, since you can’t get the `name` property of `undefined`. That’s where Promises come into play. Basically, we are telling JS “Do this, and then wait for a response before moving on to read the name field”.
+function functionTwo() {
+  const secondApiCall = callApi("second-api-url.com", { method: "GET" }); //Always takes 5 seconds
 
-That’s great, except now you are stuck waiting! Or are you? Here is a very simplified explanation of how the event loop works:
+  console.log("Here is your data:", secondApiCall.data);
+}
+```
 
-There are two main components (for our purposes, there are actually more):
-The call stack - this is the list of commands that Javascript is going to execute, in order
-Think of the call stack as a “to-do” list. JS always checks off one item at a time, top to bottom
-The callback queue - When we need to wait for something to happen outside of our code (like a call to another server or database), it gets added to the callback queue. Imagine it as a “reminder” to look for a response.
-When all the steps in the call stack get executed, JS will look at the callback queue and see if there are any responses. If there are, the next steps will be added to the call stack so the response can be processed.
+If you've dealt with API calls before, you may notice there's a problem here. JS doesn't know it needs to _wait_ for the API calls to get a response! So it will make the call, then immediately try to read response's `data` value. The response will be `undefined` because the the API hasn't replied yet and trying to read `(undefined).data` is impossible and will throw an error.
 
-The instructions we give the program are all added in the call stack, in order. But instead of having an instruction of “make this API call and wait for a response”, we can have an instruction that says “make this API call, but don’t wait for a response. Set a reminder to look for a response later on instead, and when you get a response follow these instructions”. So we “pause” the execution of a particular instruction until we get a response, but we aren’t blocking the execution of the next instruction while we wait.
+We need to have a way to tell JavaScript to wait for the response before executing the next instruction in that function! That's where Promises come in
 
-Once JS finishes with all the steps in the call stack, it will go check the “reminder list” which is actually the callback queue and see if any of the responses it was waiting for arrived. If so, it adds the next steps to the call stack. If not, after checking all of the callback queue in order and if there are no new instructions added to the call stack, it checks the callback queue again from the top until all responses come in and the program can complete.
+### Promises
 
-Explaining this in writing is a little complicated, but I’ll try! Let’s say that we have a few functions we want to call for our social media page called “FaceRobertson” or maybe “RobertsonBook”:
-userLogin(): Requires an API call to authenticate the user. Returns an unique identifier for the user
-getUserDetails(userId): Requires an API call to fetch the user’s name, unread notifications and alerts. Also gets the user’s settings
-getUserPostsById(userId): Requires an API call to fetch all the posts we want to display for the user
-setUserStyles(userSettings): Sets the page styles to match the user’s settings
-setUserUi(userSettings): The user can choose to edit how the UI looks for them (different buttons visible/hidden, different layout, etc)
-renderPage(): Actually shows the page
+Promises allow us to tell JavaScript "Run this instruction, then wait for a response. When you get a response, follow the rest of the instructions". This fixes the original problem above but presents us with a new problem. Since JS is single-threaded, it can only do one thing at a time, which means it will sit there and wait for the response doing nothing!
 
-We could call all of these sequentially:
-The user logs in
-We request the details and wait to get a response
-We request the user’s posts and wait to get a response
-With the details we set the user styles first
-Then we set the user UI
-With the name, notification, alerts, styles, UI and posts we can render the page
-The problem is, step 3 can’t even start until step 2 completes! So let’s say step 2 takes 10 seconds and step 3 takes 5, now we are stuck waiting 15 seconds!
+firstApiCall() takes 10 seconds, and secondApiCall() 5. If we do them one after the other, we'll have to wait 15 seconds!
 
-Thanks to the event loop, we can do better. We can start the API call in step 2 (getUserDetails), register that we are waiting for a response and the next steps in the callback loop, then start the API call in step 3 (getUserPostsById) and do the same. This means that if step 2 takes 10 seconds and step 3 takes 5 - we only have to wait 10 seconds total! Step 3 will complete 5 seconds in and Step 2 10 seconds in, so overall we only have to wait for the slowest step to complete! Not each of them in turn.
+Can we do any better? Yes! The JS event loop can help us reduce our wait time. Let me give you a (simplified) explanation of this event loop below.
 
-It would look something like:
-The user logs in
-We request the details, with getUserDetails, and we register the fact we are waiting for a response in the callback queue.
-setUserStyles and setUserUI need this data - so they get added to the callback queue too
-getUserPostsById doesn’t need getUserDetails to complete, so we can make that call now, without waiting any further. Since it’s an API call, we also register that we are waiting for a response in the callback queue
-Since we have nothing to render, we’ll code things so that we won’t render anything yet - we’ll just queue up the renderPage() function as well
+## The JavaScript Event Loop
 
-OK! That’s the end of the call stack, so JS will look at the callback queue. Let’s say that getUserDetails returned a response, but getUserPostsById did not.
-Since getUserDetails completed, now setUserStyles and setUserUi get added to the call stack and executed
-Neither of them require waiting, so they complete - giving us enough information to set a page layout for the user
-That was the end of the call stack so…
-Back to the callback queue! getUserPostsById hasn’t completed yet, but with the user styles and ui we can actually do something for the user!
-We add renderPage() to the call stack with the right styles and UI, as well as a “loading” default content
-This is important, as it gives the user the feeling that things are happening!
-Since the page isn’t fully rendered, we register another call of renderPage() in the callback queue
-Then finally getUserPostsById returns some data! We can use that data to add renderPage with the right details to the call stack - so the full page is rendered.
+We are going to focus on two components of the event loop, the **call stack** and **callback queue**.
 
-Lastly, what’s the difference between Promises and async/await? As far as how the code executes, nothing! asnyc/await is a more readable way of writing Promises, but they do the same thing.
+JavaScript will follow all instructions in its call stack, one at a time. But callbacks are a special kind of instruction that allow JS to start processing something, pause, and set a reminder (a task in the callback queue) to wait for a certain event to happen before continuing with those instructions. In the meantime, JS can move on to the next instruction in the call stack. This means that Promises are **non-blocking**!
 
-I hope this makes sense! It’s a bit of a tricky concept - so if you are still lost let me know and I’ll do my best to help.
+When JS finishes going through all the tasks in the call stack, it will look at the callback queue and see if any of the events happened. If they did, JS will add the steps for handling those events to the call stack and continue processing them.
+
+<details>
+<summary>Click here to view an example diagram</summary>
+
+![Event Loop Example](./event-loop-diagram.png)
+
+</details>
+
+## Putting it all together
+
+Promises allow us to wait for an event to happen, and the event loop (thanks to the callback queue) allows us to do other things while we wait.
+
+If you recall, firstApicall() took 10 seconds to resolve, and secondApiCall() 5. By leveraging promises and the event loop, we can _start_ firstApiCall() and register it to the callback queue without waiting for a response. Then we _start_ secondApiCall() and do the same.
+
+- secondApiCall() will return first, after 5 seconds
+- firstApiCall() will return second, 5 seconds after secondApiCall() returned (so 10 seconds total)
+
+Total wait time? 10 seconds! And this would be the same even if we had many Promises happening together. For example, if we had 100 API calls to make, **we would only need to wait for the slowest one to complete, because the other ones will be handled during this wait time**.
+
+Having said that, we still need to tell JavaScript that it needs to wait for a Promise to resolve. There are two ways of doing this, using the `Promise` syntax and the `async/await` syntax. Both work the same when the program runs, they are just different ways of writing and organizing code.
+
+Going into all of the syntax details of `Promises` and `async/await` is beyond the scope of this explanation, but here is a simplified example:
+
+```js
+//Note: callApi is (still) a made up function for illustration purposes
+
+// Using Promise syntax
+function functionOne() {
+  const firstApiCall = new Promise((resolve, reject) => {
+    return callApi("first-api-url.com", { method: "GET" }); //Always takes at least 10 seconds return firstApiCall.data;
+  });
+
+  firstApiCall.then((response) => console.log("Here is your data:", response.data));
+}
+
+// Using async/await
+async function functionTwo() {
+  const secondApiCall = await callApi("second-api-url.com", { method: "GET" }); //Always takes 5 seconds
+
+  console.log("Here is your data:", secondApiCall.data);
+}
+```
+
+This is still not the ideal syntax - this code wouldn't handle errors very well! If you are curious
+
+<details><summary>this is what a better version of the code would look like</summary>
+
+The .catch block in promises and try/catch syntax for async/await allows us to gracefully handle errors. There are other options regarding syntax that allow you to do different things, but I don't want to get even further away from our scope here!
+
+```js
+function functionOne() {
+  const firstApiCall = new Promise((resolve, reject) => {
+    return callApi("first-api-url.com", { method: "GET" });
+  });
+
+  firstApiCall
+    .then((response) => console.log("Here is your data:", response.data))
+    .catch((error) => {
+      console.log("Oh no! An error!", error);
+    });
+}
+
+async function functionTwo() {
+  try {
+    const secondApiCall = await callApi("second-api-url.com", { method: "GET" }); //Always takes 5 seconds
+
+    console.log("Here is your data:", secondApiCall.data);
+  } catch (error) {
+    console.log("Oh no! An error!", error);
+  }
+}
+```
+
+</details>
+
+## Summary
+
+Promises allow us to gracefully wait for certain events (like timers to complete or API responses to return) to happen before executing certain code that requires those events.
+
+The event loop allows us to do other things while waiting for those events. Together, this helps make your JavaScript code much faster!
